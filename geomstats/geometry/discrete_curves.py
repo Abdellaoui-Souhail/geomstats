@@ -19,6 +19,8 @@ from geomstats.geometry.pullback_metric import PullbackDiffeoMetric
 from geomstats.geometry.quotient_metric import QuotientMetric
 from geomstats.geometry.riemannian_metric import RiemannianMetric
 from geomstats.geometry.symmetric_matrices import SymmetricMatrices
+from geomstats.geometry.product_manifold import ProductManifold, ProductRiemannianMetric
+
 
 
 class DiscreteCurves(Manifold):
@@ -71,7 +73,9 @@ class DiscreteCurves(Manifold):
         )
 
         self._quotient_map = {
-            (SRVMetric, "reparametrizations"): (SRVShapeBundle, SRVQuotientMetric),
+            (SRVMetric, "translations"): (SRVTranslationBundle, SRVTranslationMetric),
+            (SRVMetric, "reparametrizations"): (SRVReparametrizationBundle, SRVReparametrizationMetric),
+            (SRVMetric, "reparametrizations and translations"): (SRVReparametrizationTranslationBundle, SRVReparametrizationTranslationMetric),
         }
 
     def new(self, equip=True):
@@ -256,6 +260,18 @@ class DiscreteCurves(Manifold):
             starting_sampling_point = sample[:, 0, :]
             sample = sample - starting_sampling_point[:, None, :]
         return sample[0] if n_samples == 1 else sample
+
+
+class DiscreteCurvesStartAtOrigin(Manifold):
+    a = 0
+
+
+class DiscreteCurvesOfUnitLenght(Manifold):
+    a = 0
+
+
+class DiscreteCurvesStartAtOriginOfUnitLenght(Manifold):
+    a = 0
 
 
 class ClosedDiscreteCurves(LevelSet):
@@ -1161,7 +1177,7 @@ class ElasticMetric(PullbackDiffeoMetric):
         return path
 
 
-class SRVMetric(PullbackDiffeoMetric):
+class _SRVMetric(PullbackDiffeoMetric):
     """Square Root Velocity metric on the space of discrete curves.
 
     The SRV metric is equivalent to the elastic metric chosen with
@@ -1188,10 +1204,8 @@ class SRVMetric(PullbackDiffeoMetric):
     def __init__(
         self,
         space,
-        translation_invariant=True,
     ):
         super().__init__(space=space)
-        self.translation_invariant = translation_invariant
 
     def _check_ambient_manifold(self, ambient_manifold):
         if not isinstance(ambient_manifold, Euclidean):
@@ -1213,7 +1227,335 @@ class SRVMetric(PullbackDiffeoMetric):
         embedding_space : Manifold object
             Embedding space.
         """
-        print("here")
+        embedding_space = DiscreteCurves(
+            ambient_manifold=self._space.ambient_manifold,
+            k_sampling_points=self._space.k_sampling_points - 1,
+            equip=False,
+        )
+        embedding_space.equip_with_metric(L2CurvesMetric)
+        return embedding_space
+
+    def f_transform(self, point, tol=gs.atol):
+        r"""Square Root Velocity Transform (SRVT).
+
+        Compute the square root velocity representation of a curve. The
+        velocity is computed using the log map.
+
+        In the case of several curves, an index selection procedure allows to
+        get rid of the log between the end point of curve[k, :, :] and the starting
+        point of curve[k + 1, :, :].
+
+        .. math::
+            Q(c) = c'/ |c'|^{1/2}
+
+        Parameters
+        ----------
+        point : array-like, shape=[..., k_sampling_points, ambient_dim]
+            Discrete curve.
+
+        tol : float
+            Tolerance value to decide duplicity of two consecutive sample
+            points on a given Discrete Curve.
+
+        Returns
+        -------
+        srv : array-like, shape=[..., k_sampling_points - 1, ambient_dim]
+            Square-root velocity representation of a discrete curve.
+        """
+        ambient_metric = self._space.ambient_manifold.metric
+        if gs.any(ambient_metric.norm(point[..., 1:, :] - point[..., :-1, :]) < tol):
+            raise AssertionError(
+                "The square root velocity framework "
+                "is only defined for discrete curves "
+                "with distinct consecutive sample points."
+            )
+        point_ndim = gs.ndim(point)
+        point = gs.to_ndarray(point, to_ndim=3)
+        n_points, k_sampling_points, n_coords = point.shape
+        srv_shape = (n_points, k_sampling_points - 1, n_coords)
+
+        point = gs.reshape(point, (n_points * k_sampling_points, n_coords))
+        coef = k_sampling_points - 1
+        velocity = coef * ambient_metric.log(
+            point=point[1:, :], base_point=point[:-1, :]
+        )
+        velocity_norm = ambient_metric.norm(velocity, point[:-1, :])
+        srv = gs.einsum("...i,...->...i", velocity, 1.0 / gs.sqrt(velocity_norm))
+
+        index = gs.arange(n_points * k_sampling_points - 1)
+        mask = ~((index + 1) % k_sampling_points == 0)
+        srv = gs.reshape(srv[mask], srv_shape)
+
+        if point_ndim == 2:
+            return gs.squeeze(srv)
+        return srv
+
+    def diffeomorphism(self, base_point):
+        r"""Diffeomorphism at base point.
+
+        This is the Square Root Velocity Function.
+
+        Parameters
+        ----------
+        base_point : array-like, shape=[..., k_sampling_points, ambient_dim]
+            Discrete curve.
+
+        Returns
+        -------
+        image_point : array-like, shape=[..., k_sampling_points - 1, ambient_dim]
+            Square-root velocity representation of a discrete curve.
+        """
+        return self.f_transform(base_point)
+
+    def f_transform_inverse(self, srv, starting_sampling_point):
+        r"""Inverse of the Square Root Velocity Transform (SRVT).
+
+        Retrieve a curve from its square root velocity representation and
+        starting point.
+
+        .. math::
+            c(t) = c(0) + \int_0^t q(s) |q(s)|ds
+
+        with:
+        - c the curve that can be retrieved only up to a translation,
+        - q the srv representation of the curve,
+        - c(0) the starting point of the curve.
+
+
+        See [Sea2011]_ Section 2.1 for details.
+
+        Parameters
+        ----------
+        srv : array-like, shape=[..., k_sampling_points - 1, ambient_dim]
+            Square-root velocity representation of a discrete curve.
+        starting_sampling_point : array-like, shape=[..., ambient_dim]
+            Point of the ambient manifold to use as start of the retrieved curve.
+
+        Returns
+        -------
+        curve : array-like, shape=[..., k_sampling_points, ambient_dim]
+            Curve retrieved from its square-root velocity.
+        """
+        if gs.ndim(srv) != gs.ndim(starting_sampling_point):
+            starting_sampling_point = gs.to_ndarray(
+                starting_sampling_point, to_ndim=srv.ndim, axis=-2
+            )
+        srv_shape = srv.shape
+        srv = gs.to_ndarray(srv, to_ndim=3)
+        n_curves, k_sampling_points_minus_one, n_coords = srv.shape
+
+        srv_flat = gs.reshape(srv, (n_curves * k_sampling_points_minus_one, n_coords))
+        srv_norm = self._space.ambient_manifold.metric.norm(srv_flat)
+
+        dt = 1 / k_sampling_points_minus_one
+
+        delta_points = gs.einsum("...,...i->...i", dt * srv_norm, srv_flat)
+        delta_points = gs.reshape(delta_points, srv_shape)
+
+        curve = gs.concatenate((starting_sampling_point, delta_points), -2)
+
+        return gs.cumsum(curve, -2)
+
+    def inverse_diffeomorphism(self, image_point):
+        r"""Inverse diffeomorphism at image point.
+
+        This is the curve starting at the origin whose square root velocity
+        transform is image point.
+
+        Parameters
+        ----------
+        image_point : array-like, shape=[..., k_sampling_points - 1, ambient_dim]
+            Square-root velocity representation of a discrete curve.
+
+        Returns
+        -------
+        curve : array-like, shape=[..., k_sampling_points, ambient_dim]
+            Curve starting at the origin retrieved from its square-root velocity.
+        """
+        starting_sampling_point = gs.zeros(gs.shape(image_point[..., 0, :]))
+        f_transform = image_point
+        return self.f_transform_inverse(f_transform, starting_sampling_point)
+
+    def tangent_diffeomorphism(self, tangent_vec, base_point):
+        r"""Differential of the square root velocity transform.
+
+        ..math::
+            (h, c) -> dQ_c(h) = |c'|^(-1/2} * (h' - 1/2 * <h',v>v)
+            v = c'/|c'|
+
+        Parameters
+        ----------
+        tangent_vec : array-like, shape=[..., k_sampling_points, ambient_dim]
+            Tangent vector to curve, i.e. infinitesimal vector field
+            along curve.
+        base_point : array-like, shape=[..., k_sampling_points, ambiend_dim]
+            Discrete curve.
+
+        Returns
+        -------
+        d_srv_vec : array-like, shape=[..., k_sampling_points - 1, ambient_dim,]
+            Differential of the square root velocity transform at curve
+            evaluated at tangent_vec.
+        """
+        k_sampling_points = base_point.shape[-2]
+        d_vec = (k_sampling_points - 1) * (
+            tangent_vec[..., 1:, :] - tangent_vec[..., :-1, :]
+        )
+        velocity_vec = (k_sampling_points - 1) * (
+            base_point[..., 1:, :] - base_point[..., :-1, :]
+        )
+        velocity_norm = self._space.ambient_manifold.metric.norm(velocity_vec)
+        unit_velocity_vec = gs.einsum(
+            "...ij,...i->...ij", velocity_vec, 1 / velocity_norm
+        )
+
+        inner_prod = self.embedding_space.metric.pointwise_inner_products(
+            d_vec, unit_velocity_vec, base_point[..., :-1, :]
+        )
+        d_vec_tangential = gs.einsum("...ij,...i->...ij", unit_velocity_vec, inner_prod)
+        d_srv_vec = d_vec - 1 / 2 * d_vec_tangential
+        d_srv_vec = gs.einsum(
+            "...ij,...i->...ij", d_srv_vec, 1 / velocity_norm ** (1 / 2)
+        )
+
+        return d_srv_vec
+
+    def inverse_tangent_diffeomorphism(self, tangent_vec, image_point):
+        r"""Inverse of differential of the square root velocity transform.
+
+        .. math::
+            (c, k) -> h, where dQ_c(h)=k and h' = |c'| * (k + <k,v> v)
+
+        Parameters
+        ----------
+        tangent_vec : array-like, shape=[..., k_sampling_points - 1, ambient_dim]
+            Tangent vector to srv.
+        image_point : array-like, shape=[..., k_sampling_points, ambient_dim]
+            Square root velocity representation of a discrete curve.
+
+        Returns
+        -------
+        vec : array-like, shape=[..., ambient_dim]
+            Inverse of the differential of the square root velocity transform at
+            curve evaluated at tangent_vec.
+        """
+        point = self.inverse_diffeomorphism(image_point)
+        point = gs.to_ndarray(point, to_ndim=3)
+        n_points, k_sampling_points, ambient_dim = point.shape
+
+        k_sampling_points = point.shape[-2]
+        velocity_vec = (k_sampling_points - 1) * (
+            point[..., 1:, :] - point[..., :-1, :]
+        )
+        velocity_norm = self._space.ambient_manifold.metric.norm(velocity_vec)
+        unit_velocity_vec = gs.einsum(
+            "...ij,...i->...ij", velocity_vec, 1 / velocity_norm
+        )
+        inner_prod = self.embedding_space.metric.pointwise_inner_products(
+            tangent_vec, unit_velocity_vec, point[..., :-1, :]
+        )
+        tangent_vec_tangential = gs.einsum(
+            "...ij,...i->...ij", unit_velocity_vec, inner_prod
+        )
+        d_vec = tangent_vec + tangent_vec_tangential
+        d_vec = gs.einsum("...ij,...i->...ij", d_vec, velocity_norm ** (1 / 2))
+        increment = d_vec / (k_sampling_points - 1)
+        initial_value = gs.zeros((n_points, 1, ambient_dim))
+
+        n_increments, _, _ = increment.shape
+        if n_points != n_increments:
+            if n_points == 1:
+                initial_value = gs.tile(initial_value, (n_increments, 1, 1))
+            elif n_increments == 1:
+                increment = gs.tile(increment, (n_points, 1, 1))
+            else:
+                raise ValueError("Number of curves and of increments are incompatible.")
+
+        vec = gs.concatenate((initial_value, increment), -2)
+
+        vec = gs.cumsum(vec, -2)
+
+        return gs.squeeze(vec)
+
+    @staticmethod
+    def space_derivative(curve):
+        """Compute space derivative of curve using centered differences.
+
+        Parameters
+        ----------
+        curve : array-like, shape=[..., k_sampling_points, ambient_dim]
+            Discrete curve.
+
+        Returns
+        -------
+        space_deriv : array-like, shape=[...,k_sampling_points, ambient_dim]
+        """
+        n_points = curve.shape[-2]
+        if n_points < 2:
+            raise ValueError("The curve needs to have at least 2 points.")
+
+        vec_1 = gs.array([-1.0] + [0.0] * (n_points - 2) + [1.0])
+        vec_2 = gs.array([1.0 / 2] * (n_points - 2) + [1.0])
+        vec_3 = gs.array([1.0] + [1.0 / 2] * (n_points - 2))
+
+        mat_1 = from_vector_to_diagonal_matrix(vec_1, 0)
+        mat_2 = from_vector_to_diagonal_matrix(vec_2, -1)
+        mat_3 = from_vector_to_diagonal_matrix(vec_3, 1)
+        mat_space_deriv = mat_1 - mat_2 + mat_3
+
+        return n_points * gs.matmul(mat_space_deriv, curve)
+
+
+class _SRVMetricUnitLenght(PullbackDiffeoMetric):
+    """Square Root Velocity metric on the space of discrete curves.
+
+    The SRV metric is equivalent to the elastic metric chosen with
+    - bending parameter a = 1,
+    - stretching parameter b = 1/2.
+    It can be obtained as the pullback of the L2 metric by the Square Root
+    Velocity Function.
+
+    See [Sea2011]_ for details.
+
+    Parameters
+    ----------
+    translation_invariant : bool
+        Optional, default : True.
+
+    References
+    ----------
+    .. [Sea2011] A. Srivastava, E. Klassen, S. H. Joshi and I. H. Jermyn,
+        "Shape Analysis of Elastic Curves in Euclidean Spaces,"
+        in IEEE Transactions on Pattern Analysis and Machine Intelligence,
+        vol. 33, no. 7, pp. 1415-1428, July 2011.
+    """
+
+    def __init__(
+        self,
+        space,
+    ):
+        super().__init__(space=space)
+
+    def _check_ambient_manifold(self, ambient_manifold):
+        if not isinstance(ambient_manifold, Euclidean):
+            raise AssertionError(
+                "This metric is only "
+                "implemented for discrete curves embedded "
+                "in a Euclidean space."
+            )
+
+    def _define_embedding_space(self):
+        r"""Define embedding space with metric to pull back.
+
+        Define the embedding space equipped with the metric which is pulled back
+        by the Square Root Velocity Function to induce the Square Root Velocity
+        Metric on the space of discrete curves.
+        This is the L2 metric.
+
+        -------
+        embedding_space : Manifold object
+            Embedding space.
+        """
         embedding_space = DiscreteCurves(
             ambient_manifold=self._space.ambient_manifold,
             k_sampling_points=self._space.k_sampling_points - 1,
@@ -1494,7 +1836,192 @@ class SRVMetric(PullbackDiffeoMetric):
         return n_points * gs.matmul(mat_space_deriv, curve)
 
 
-class SRVShapeBundle(FiberBundle):
+class SRVMetric(PullbackDiffeoMetric):
+    """Square Root Velocity metric on the space of discrete curves.
+
+    The SRV metric is equivalent to the elastic metric chosen with
+    - bending parameter a = 1,
+    - stretching parameter b = 1/2.
+    It can be obtained as the pullback of the L2 metric by the Square Root
+    Velocity Function.
+
+    See [Sea2011]_ for details.
+
+    Parameters
+    ----------
+    translation_invariant : bool
+        Optional, default : True.
+
+    References
+    ----------
+    .. [Sea2011] A. Srivastava, E. Klassen, S. H. Joshi and I. H. Jermyn,
+        "Shape Analysis of Elastic Curves in Euclidean Spaces,"
+        in IEEE Transactions on Pattern Analysis and Machine Intelligence,
+        vol. 33, no. 7, pp. 1415-1428, July 2011.
+    """
+
+    def __init__(
+        self,
+        space,
+    ):
+        super().__init__(space=space)
+
+    def _check_ambient_manifold(self, ambient_manifold):
+        if not isinstance(ambient_manifold, Euclidean):
+            raise AssertionError(
+                "This metric is only "
+                "implemented for discrete curves embedded "
+                "in a Euclidean space."
+            )
+
+    def _define_embedding_space(self):
+        r"""Define embedding space with metric to pull back.
+        """
+        space = self._space
+        discrete_curves = DiscreteCurves(
+            space.ambient_manifold, space.k_sampling_points, equip=False)
+        discrete_curves.equip_with_metric(_SRVMetric)
+        
+        factors = [space.ambient_manifold, discrete_curves]
+        embedding_space = ProductManifold(
+            factors = factors, default_point_type="auto")
+        return embedding_space
+
+    def diffeomorphism(self, curves):
+        r"""
+        """
+        curve_ndim = gs.ndim(curves)
+        curves = gs.to_ndarray(curves, to_ndim=3)
+        n_curves, k_sampling_points, dim = curves.shape
+
+        
+        starting_point = curves[:,0,:]
+        starting_points = copy.deepcopy(curves[:,0,:])
+        starting_points = starting_points[:,None,:].repeat(k_sampling_points,axis=1)
+        curves_start_origin = curves - starting_points
+        
+        """
+        result = gs.zeros(2,dtype=object)
+
+        if curve_ndim == 2:
+            result[0] = gs.squeeze(starting_point)
+            result[1] = gs.squeeze(curves_start_origin)
+            print(result)
+            return result
+
+        result[0] = starting_point
+        result[1] = curves_start_origin
+        return [starting_point,curves_start_origin]
+        """
+
+        result = gs.zeros((n_curves,k_sampling_points+1,dim),dtype=float)
+        
+        if curve_ndim == 2:
+            result[:,0,:] = starting_point
+            result[:,1:,:] = curves_start_origin
+            result = gs.squeeze(result)
+            result = result.flatten()
+            return result
+
+        result[:,0,:] = starting_point
+        result[:,1:,:] = curves_start_origin
+        result = gs.reshape(result, (n_curves, (k_sampling_points+1)*dim) )
+        return result
+
+    def inverse_diffeomorphism(self, image_point):
+        r"""Inverse diffeomorphism at image point.
+        """
+        
+        dim = self._space.ambient_manifold.dim
+        k_sampling_points = self._space.k_sampling_points
+        
+        curve_ndim = gs.ndim(image_point)
+        image_points = gs.to_ndarray(image_point, to_ndim=2)
+        n_curves, _ = image_points.shape
+        starting_points = image_points[:,:dim]
+        curves_start_origin_flatten = image_points[:,dim:]
+        curves_start_origin = curves_start_origin_flatten.reshape((n_curves,k_sampling_points,dim))
+        
+        
+        starting_points = starting_points[:,None,:].repeat(k_sampling_points,axis=1)
+
+        curves = curves_start_origin + starting_points
+
+        if curve_ndim == 1:
+            return gs.squeeze(curves)
+        
+        return curves
+
+    def tangent_diffeomorphism(self, tangent_vec, point):
+        r"""
+        """
+        return self.diffeomorphism(tangent_vec)
+
+    def inverse_tangent_diffeomorphism(self, tangent_vec, image_point):
+        r"""
+        """
+        return self.inverse_diffeomorphism(tangent_vec)
+
+
+class SRVTranslationBundle(FiberBundle):
+    
+    def __init__(self, total_space):
+        super().__init__(total_space=total_space, group_action="Translation")
+        self._srvmetric = _SRVMetric(space=total_space)
+    
+    def riemannian_submersion(self, point):
+        point_ndim = gs.ndim(point)
+        point = gs.to_ndarray(point, to_ndim=3)
+        n_points, k_sampling_points, dim = point.shape
+
+        
+        starting_point = point[:,0,:]
+        starting_points = copy.deepcopy(point[:,0,:])
+        starting_points = starting_points[:,None,:].repeat(k_sampling_points,axis=1)
+        result = point - starting_points
+
+        if point_ndim == 2:
+            return gs.squeeze(result)
+        return result
+    
+    def horizontal_projection(self, tangent_vec, base_point):
+        return self.riemannian_submersion(tangent_vec)
+    
+    def align (self, base_point, point):
+        point_ndim = gs.ndim(point)
+        base_point_ndim = gs.ndim(base_point)
+        
+        if base_point_ndim != point_ndim : 
+            raise AssertionError(
+                "Point and Base_Point should have the same dimension.")
+        
+        point = gs.to_ndarray(point, to_ndim=3)
+        base_point = gs.to_ndarray(base_point, to_ndim=3)
+        n_points, k_sampling_points, dim = point.shape
+
+        
+        starting_point = point[:,0,:]
+        starting_base_point = base_point[:,0,:]
+        translation = starting_base_point - starting_point
+        translations = copy.deepcopy(point[:,0,:])
+        translations = translations[:,None,:].repeat(k_sampling_points,axis=1)
+        result = point + translation
+
+        if point_ndim == 2:
+            return gs.squeeze(result)
+        return result
+
+
+class SRVTranslationMetric(QuotientMetric):
+    
+    def geodesic(self, initial_point, end_point=None, initial_tangent_vec=None, **kwargs):
+        return self._srvmetric.geodesic(initial_point, end_point, initial_tangent_vec, **kwargs)
+    
+    def dist(self, point_a, point_b, **kwargs):
+        return self._srvmetric.dist(point_a, point_b, **kwargs)
+
+
+class SRVReparametrizationTranslationBundle(FiberBundle):
     """Principal bundle of shapes of curves induced by the SRV metric.
 
     The space of parameterized curves is the total space of a principal
@@ -1820,7 +2347,7 @@ class SRVShapeBundle(FiberBundle):
                     time_deriv, geod[:-1], return_norm=True
                 )
 
-                space_deriv = SRVMetric.space_derivative(geod)
+                space_deriv = _SRVMetric.space_derivative(geod)
                 space_deriv_norm = self.total_space.ambient_manifold.metric.norm(
                     space_deriv
                 )
@@ -2157,8 +2684,7 @@ class SRVShapeBundle(FiberBundle):
             return results["geodesics"]
 
         raise AssertionError(
-            "The only methods implemented are iterative horizontal projection \
-            and dynamic programming.")
+            "The only methods implemented are iterative horizontal projection and dynamic programming.")
 
     def align(self, base_point, point, n_times=20,
               method="iterative horizontal projection",
@@ -2192,7 +2718,7 @@ class SRVShapeBundle(FiberBundle):
         return hor_path[-1]
 
 
-class SRVQuotientMetric(QuotientMetric):
+class SRVReparametrizationTranslationMetric(QuotientMetric):
     """SRV quotient metric on the space of unparametrized curves.
 
     This is the class for the quotient metric induced by the SRV Metric
@@ -2202,7 +2728,7 @@ class SRVQuotientMetric(QuotientMetric):
     """
 
     def geodesic(
-            self, initial_point, end_point, method="iterative horizontal projection",
+            self, initial_point, end_point, initial_tangent_vec=None, method="iterative horizontal projection",
             threshold=1e-3, n_discretization=100, max_slope=10):
         """Geodesic for the quotient SRV Metric.
 
@@ -2211,8 +2737,12 @@ class SRVQuotientMetric(QuotientMetric):
         curves. Since in practice shapes can only be encoded by parametrized curves,
         geodesics are given in the total space.
         """
-        return self.fiber_bundle.horizontal_geodesic(
+        if end_point is None:
+            raise AssertionError("Not implemented")
+        
+        result = self.fiber_bundle.horizontal_geodesic(
             initial_point, end_point, method, threshold, n_discretization, max_slope)
+        return result
 
     def dist(self, point_a, point_b, method="iterative horizontal projection",
              n_times=20, threshold=1e-3, n_discretization=100, max_slope=6):
@@ -2274,3 +2804,292 @@ class SRVQuotientMetric(QuotientMetric):
         raise AssertionError(
             "The only methods implemented are iterative horizontal projection \
             and dynamic programming.")
+
+
+class SRVReparametrizationBundle(FiberBundle):
+
+    def __init__(self, total_space):
+        super().__init__(total_space=total_space)
+        self.l2_curves_metric = L2CurvesMetric(total_space)
+        self._srv_reparametrization_translation_bundle = \
+        SRVReparametrizationTranslationBundle(total_space=total_space)
+
+    def vertical_projection(self, tangent_vec, point, return_norm=False):
+        """Compute vertical part of tangent vector at base point.
+
+        Parameters
+        ----------
+        tangent_vec : array-like,
+            shape=[..., k_sampling_points, ambient_dim]
+            Tangent vector to decompose into horizontal and vertical parts.
+        point : array-like,
+            shape=[..., k_sampling_points, ambient_dim]
+            Discrete curve, base point of tangent_vec in the manifold of curves.
+        return_norm : boolean,
+            If True, the method returns the pointwise norm of the vertical
+            part of tangent_vec.
+            Optional, default is False.
+
+        Returns
+        -------
+        tangent_vec_ver : array-like,
+            shape=[..., k_sampling_points, ambient_dim]
+            Vertical part of tangent_vec.
+        vertical_norm: array-like, shape=[..., n_points]
+            Pointwise norm of the vertical part of tangent_vec.
+            Only returned when return_norm is True.
+        """
+        if tangent_vec.ndim > point.ndim:
+            point = gs.broadcast_to(point, tangent_vec.shape)
+
+        ambient_dim = point.shape[-1]
+        a_param = 1
+        b_param = 1 / 2
+        quotient = a_param / b_param
+
+        position = point[..., 1:-1, :]
+        d_pos = (point[..., 2:, :] - point[..., :-2, :]) / 2
+        d_vec = (tangent_vec[..., 2:, :] - tangent_vec[..., :-2, :]) / 2
+        d2_pos = point[..., 2:, :] - 2 * point[..., 1:-1, :] + point[..., :-2, :]
+        d2_vec = (
+            tangent_vec[..., 2:, :]
+            - 2 * tangent_vec[..., 1:-1, :]
+            + tangent_vec[..., :-2, :]
+        )
+
+        vec_a = self.l2_curves_metric.pointwise_norms(
+            d_pos, position
+        ) ** 2 - 1 / 2 * self.l2_curves_metric.pointwise_inner_products(
+            d2_pos, d_pos, position
+        )
+        vec_b = -2 * self.l2_curves_metric.pointwise_norms(
+            d_pos, position
+        ) ** 2 - quotient**2 * (
+            self.l2_curves_metric.pointwise_norms(d2_pos, position) ** 2
+            - self.l2_curves_metric.pointwise_inner_products(d2_pos, d_pos, position)
+            ** 2
+            / self.l2_curves_metric.pointwise_norms(d_pos, position) ** 2
+        )
+        vec_c = self.l2_curves_metric.pointwise_norms(
+            d_pos, position
+        ) ** 2 + 1 / 2 * self.l2_curves_metric.pointwise_inner_products(
+            d2_pos, d_pos, position
+        )
+        vec_d = self.l2_curves_metric.pointwise_norms(d_pos, position) * (
+            self.l2_curves_metric.pointwise_inner_products(d2_vec, d_pos, position)
+            - (quotient**2 - 1)
+            * self.l2_curves_metric.pointwise_inner_products(d_vec, d2_pos, position)
+            + (quotient**2 - 2)
+            * self.l2_curves_metric.pointwise_inner_products(d2_pos, d_pos, position)
+            * self.l2_curves_metric.pointwise_inner_products(d_vec, d_pos, position)
+            / self.l2_curves_metric.pointwise_norms(d_pos, position) ** 2
+        )
+
+        linear_system = (
+            from_vector_to_diagonal_matrix(vec_a[..., :-1], 1)
+            + from_vector_to_diagonal_matrix(vec_b, 0)
+            + from_vector_to_diagonal_matrix(vec_c[..., 1:], -1)
+        )
+        vertical_norm = gs.to_ndarray(gs.linalg.solve(linear_system, vec_d), to_ndim=2)
+        n_points = vertical_norm.shape[0]
+        vertical_norm = gs.squeeze(
+            gs.hstack((gs.zeros((n_points, 1)), vertical_norm, gs.zeros((n_points, 1))))
+        )
+
+        unit_speed = gs.einsum(
+            "...ij,...i->...ij",
+            d_pos,
+            1 / self.l2_curves_metric.pointwise_norms(d_pos, position),
+        )
+        tangent_vec_ver = gs.einsum(
+            "...ij,...i->...ij", unit_speed, vertical_norm[..., 1:-1]
+        )
+        tangent_vec_ver = gs.concatenate(
+            (
+                gs.zeros((n_points, 1, ambient_dim)),
+                gs.to_ndarray(tangent_vec_ver, to_ndim=3),
+                gs.zeros((n_points, 1, ambient_dim)),
+            ),
+            axis=1,
+        )
+        tangent_vec_ver = gs.squeeze(tangent_vec_ver)
+        if return_norm:
+            return tangent_vec_ver, vertical_norm
+
+        return tangent_vec_ver
+
+    def horizontal_projection(self, tangent_vec, point):
+        """Compute horizontal part of tangent vector at base point.
+
+        Parameters
+        ----------
+        tangent_vec : array-like,
+            shape=[..., k_sampling_points, ambient_dim]
+            Tangent vector to decompose into horizontal and vertical parts.
+        point : array-like,
+            shape=[..., k_sampling_points, ambient_dim]
+            Discrete curve, base point of tangent_vec in the manifold of curves.
+
+        Returns
+        -------
+        tangent_vec_hor : array-like,
+            shape=[..., k_sampling_points, ambient_dim]
+            Horizontal part of tangent_vec.
+        """
+        tangent_vec_ver = self.vertical_projection(tangent_vec, point)
+        return tangent_vec - tangent_vec_ver
+
+    def align(self, base_point, point, n_times=20,
+              method="iterative horizontal projection",
+              threshold=1e-3, n_discretization=100, max_slope=10):
+        """Find optimal reparametrization of curve with respect to base curve.
+
+        The new parametrization of curve is optimal in the sense that it is the
+        member of its fiber closest to the base curve with respect to the SRVMetric.
+        It is found as the end point of the horizontal geodesic starting at the base
+        curve and ending at the fiber of curve.
+
+        Parameters
+        ----------
+        point : array-like, shape=[k_sampling_points, ambient_dim]
+            Discrete curve.
+        base_point : array-like, shape=[k_sampling_points, ambient_dim]
+            Discrete curve.
+        threshold: float
+            Threshold to use in the algorithm to compute the horizontal geodesic.
+            Optional, default: 1e-3.
+
+        Returns
+        -------
+        reparametrized_curve : array-like, shape=[k_sampling_points, ambient_dim]
+            Optimal reparametrization of the curve represented by point.
+        """
+        return self._srv_reparametrization_translation_bundle.align(
+            base_point, point, n_times, method, threshold, n_discretization, max_slope)
+
+
+class SRVReparametrizationMetric(QuotientMetric, PullbackDiffeoMetric):
+
+    def __init__(self, space, fiber_bundle, signature=None):
+        super().__init__(space=space, fiber_bundle=fiber_bundle, signature=signature)
+    
+    def _check_ambient_manifold(self, ambient_manifold):
+        if not isinstance(ambient_manifold, Euclidean):
+            raise AssertionError(
+                "This metric is only "
+                "implemented for discrete curves embedded "
+                "in a Euclidean space."
+            )
+
+    def _define_embedding_space(self):
+        r"""Define embedding space with metric to pull back.
+        """
+        space = self.fiber_bundle.total_space
+        discrete_curves = DiscreteCurves(
+            space.ambient_manifold, space.k_sampling_points, equip=True)
+        discrete_curves.equip_with_group_action("reparametrizations and translations")
+        discrete_curves.equip_with_quotient_structure()
+        
+        factors = [space.ambient_manifold, discrete_curves.quotient]
+        embedding_space = ProductManifold(
+            factors = factors, default_point_type="vector")
+        return embedding_space
+
+    def diffeomorphism(self, curves):
+        r"""
+        """
+        curve_ndim = gs.ndim(curves)
+        curves = gs.to_ndarray(curves, to_ndim=3)
+        n_curves, k_sampling_points, dim = curves.shape
+
+        
+        starting_point = curves[:,0,:]
+        starting_points = copy.deepcopy(curves[:,0,:])
+        starting_points = starting_points[:,None,:].repeat(k_sampling_points,axis=1)
+        curves_start_origin = curves - starting_points
+
+        result = gs.zeros((n_curves,k_sampling_points+1,dim),dtype=float)
+        
+        if curve_ndim == 2:
+            result[:,0,:] = starting_point
+            result[:,1:,:] = curves_start_origin
+            result = gs.squeeze(result)
+            result = result.flatten()
+            return result
+
+        result[:,0,:] = starting_point
+        result[:,1:,:] = curves_start_origin
+        result = gs.reshape(result, (n_curves, (k_sampling_points+1)*dim) )
+        return result
+
+    def inverse_diffeomorphism(self, image_point):
+        r"""Inverse diffeomorphism at image point.
+        """
+        
+        dim = self._space.ambient_manifold.dim
+        k_sampling_points = self._space.k_sampling_points
+        
+        curve_ndim = gs.ndim(image_point)
+        image_points = gs.to_ndarray(image_point, to_ndim=2)
+        n_curves, _ = image_points.shape
+        starting_points = image_points[:,:dim]
+        curves_start_origin_flatten = image_points[:,dim:]
+        curves_start_origin = curves_start_origin_flatten.reshape((n_curves,k_sampling_points,dim))
+        
+        
+        starting_points = starting_points[:,None,:].repeat(k_sampling_points,axis=1)
+
+        curves = curves_start_origin + starting_points
+
+        if curve_ndim == 1:
+            return gs.squeeze(curves)
+        
+        return curves
+
+    def tangent_diffeomorphism(self, tangent_vec, point):
+        r"""
+        """
+        return self.diffeomorphism(tangent_vec)
+
+    def inverse_tangent_diffeomorphism(self, tangent_vec, image_point):
+        r"""
+        """
+        return self.inverse_diffeomorphism(tangent_vec)
+
+
+
+class SRVRescalBundle(FiberBundle):
+    a = 0
+
+
+class SRVRescalMetric(QuotientMetric):
+    
+    def geodesic(self, initial_point, end_point):
+        return 0
+    def dist(self, initial_point, end_point):
+        return 0
+
+
+class SRVTranslationRescalBundle(FiberBundle):
+    r"""
+    """
+    def __init__(self, total_space):
+        super().__init__(total_space=total_space, group_action="Translation")
+        self.l2_curves_metric = L2CurvesMetric(total_space)
+    
+    def riemannian_submersion(self, point):
+        return point - point[0]
+    
+    def horizontal_projection(self, tangent_vec, base_point):
+        return tangent_vec - tangent_vec[0]
+    
+    def align (self, base_point, point):
+        return point + (base_point[0]-point[0])
+
+
+class SRVTranslationRescalMetric(QuotientMetric):
+
+    def geodesic(self, initial_point, end_point):
+        return 0
+    def dist(self, initial_point, end_point):
+        return 0

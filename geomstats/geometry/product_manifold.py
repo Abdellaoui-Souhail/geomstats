@@ -3,6 +3,7 @@
 Lead author: Nicolas Guigui, John Harvey.
 """
 import math
+import copy
 
 import geomstats.backend as gs
 import geomstats.errors
@@ -549,6 +550,8 @@ class ProductRiemannianMetric(_IterateOverFactorsMixins, RiemannianMetric):
             has_mixed_fields=space._has_mixed_fields,
             signature=(sig_pos, sig_neg),
         )
+        
+        self._pool_outputs_from_function = self._space._pool_outputs_from_function
 
     @property
     def shape(self):
@@ -635,12 +638,18 @@ class ProductRiemannianMetric(_IterateOverFactorsMixins, RiemannianMetric):
             Point on the manifold equal to the Riemannian exponential
             of tangent_vec at the base point.
         """
-        args = {"tangent_vec": tangent_vec, "base_point": base_point}
+        args = {"tangent_vec": tangent_vec, "base_point": base_point} | kwargs
         exp = self._iterate_over_factors("exp", args)
-
-        if self.default_point_type == "vector":
-            return gs.concatenate(exp, -1)
-        return gs.stack(exp, axis=-len(self.shape))
+        return self._pool_outputs_from_function(exp)
+        """
+        l = len(_exp)
+        exp = gs.array([])
+        for k in range(l):
+            a = copy.deepcopy(gs.array(_exp[k]))
+            a = a.flatten()
+            exp = gs.concatenate([exp,a])
+        return exp
+        """
 
     def log(self, point, base_point=None, **kwargs):
         """Compute the Riemannian logarithm of a point.
@@ -659,8 +668,41 @@ class ProductRiemannianMetric(_IterateOverFactorsMixins, RiemannianMetric):
             Tangent vector at the base point equal to the Riemannian logarithm
             of point at the base point.
         """
-        args = {"point": point, "base_point": base_point}
+        args = {"point": point, "base_point": base_point} | kwargs
         logs = self._iterate_over_factors("log", args)
-        if self.default_point_type == "vector":
-            return gs.concatenate(logs, axis=-1)
-        return gs.stack(logs, axis=-len(self.shape))
+        return self._pool_outputs_from_function(logs)
+        """
+        l = len(_logs)
+        logs = gs.array([])
+        for k in range(l):
+            a = copy.deepcopy(gs.array(_logs[k]))
+            a = a.flatten()
+            logs = gs.concatenate([logs,a])
+        return logs
+        """
+    
+    def dist(self,point_a, point_b,**kwargs):
+        args = {"point_a": point_a, "point_b": point_b} | kwargs
+        dists = gs.array(self._iterate_over_factors("dist", args))
+        dists = dists.reshape(-1)
+        return gs.linalg.norm(dists, ord=2) 
+    
+    def geodesic(self, initial_point, end_point=None, initial_tangent_vec=None, **kwargs):
+        args = {"initial_point": initial_point, "end_point": end_point, "initial_tangent_vec":initial_tangent_vec} | kwargs
+        geodesics = gs.array(self._iterate_over_factors("geodesic", args))
+        geodesics = geodesics.reshape(-1)
+        
+        def geod_fun(t):
+            t = gs.to_ndarray(t, to_ndim=1)
+            l = len(geodesics)
+            result = []
+            for k in range(l):
+                geodesic_k = geodesics[k]
+                value = geodesic_k(t)
+                value = gs.reshape(value, (len(t),math.prod(value.shape[1:])))
+                result.append(value)
+            
+            return gs.concatenate(result, axis=-1)
+
+        return geod_fun
+            
