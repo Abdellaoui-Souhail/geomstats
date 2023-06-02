@@ -1673,11 +1673,15 @@ class SRVTranslationBundle(FiberBundle):
 
 class SRVTranslationMetric(QuotientMetric):
     
-    def geodesic(self, initial_point, end_point=None, initial_tangent_vec=None, **kwargs):
-        return self._srvmetric.geodesic(initial_point, end_point, initial_tangent_vec, **kwargs)
+    def __init__(self, space, fiber_bundle, signature=None):
+        super().__init__(space=space, fiber_bundle=fiber_bundle, signature=signature)
+        self._srvmetric = _SRVMetric(space)
     
-    def dist(self, point_a, point_b, **kwargs):
-        return self._srvmetric.dist(point_a, point_b, **kwargs)
+    def geodesic(self, initial_point, end_point=None, initial_tangent_vec=None):
+        return self._srvmetric.geodesic(initial_point, end_point, initial_tangent_vec)
+    
+    def dist(self, point_a, point_b):
+        return self._srvmetric.dist(point_a, point_b)
 
 
 class SRVReparametrizationTranslationBundle(FiberBundle):
@@ -2431,15 +2435,21 @@ class SRVReparametrizationTranslationMetric(QuotientMetric):
     reparametrization corresponds to resampling.
     """
 
+    def __init__(self, space, fiber_bundle, signature=None,
+                 method="iterative horizontal projection", threshold=1e-3,
+                 n_discretization=100, max_slope=10, n_times=20):
+        super().__init__(space=space, fiber_bundle=fiber_bundle, signature=signature)
+        self.method = method
+        self.threshold = threshold
+        self.n_discretization = n_discretization
+        self.max_slope = max_slope
+        self.n_times = n_times
+    
     def geodesic(
         self,
         initial_point,
         end_point=None,
         initial_tangent_vec=None,
-        method="iterative horizontal projection",
-        threshold=1e-3,
-        n_discretization=100,
-        max_slope=10,
     ):
         """Geodesic for the quotient SRV Metric.
 
@@ -2452,18 +2462,13 @@ class SRVReparametrizationTranslationMetric(QuotientMetric):
             raise AssertionError("Not implemented")
         
         result = self.fiber_bundle.horizontal_geodesic(
-            initial_point, end_point, method, threshold, n_discretization, max_slope)
+            initial_point, end_point, self.method, self.threshold, self.n_discretization, self.max_slope)
         return result
 
     def dist(
         self,
         point_a,
         point_b,
-        method="iterative horizontal projection",
-        n_times=20,
-        threshold=1e-3,
-        n_discretization=100,
-        max_slope=6,
     ):
         """Quotient SRV distance between unparametrized curves.
 
@@ -2500,23 +2505,23 @@ class SRVReparametrizationTranslationMetric(QuotientMetric):
         quotient_dist : float
             Quotient distance between the two curves represented by point_a and point_b.
         """
-        if method == "iterative horizontal projection":
+        if self.method == "iterative horizontal projection":
             horizontal_path = self.geodesic(
-                initial_point=point_a, end_point=point_b, threshold=threshold
+                initial_point=point_a, end_point=point_b, threshold=self.threshold
             )
-            times = gs.linspace(0.0, 1.0, n_times)
+            times = gs.linspace(0.0, 1.0, self.n_times)
             horizontal_geod = horizontal_path(times)
-            horizontal_geod_velocity = n_times * (
+            horizontal_geod_velocity = self.n_times * (
                 horizontal_geod[:-1] - horizontal_geod[1:]
             )
             velocity_norms = self.fiber_bundle.total_space.metric.norm(
                 horizontal_geod_velocity, horizontal_geod[:-1]
             )
-            return gs.sum(velocity_norms) / n_times
+            return gs.sum(velocity_norms) / self.n_times
 
-        if method == "dynamic programming":
+        if self.method == "dynamic programming":
             results = self.fiber_bundle._dynamic_programming(
-                point_a, point_b, n_discretization, max_slope
+                point_a, point_b, self.n_discretization, self.max_slope
             )
             return results["distances"]
 
@@ -2689,8 +2694,15 @@ class SRVReparametrizationBundle(FiberBundle):
 
 class SRVReparametrizationMetric(QuotientMetric, PullbackDiffeoMetric):
 
-    def __init__(self, space, fiber_bundle, signature=None):
+    def __init__(self, space, fiber_bundle, signature=None,
+                 method="iterative horizontal projection", threshold=1e-3,
+                 n_discretization=100, max_slope=10, n_times=20):
         super().__init__(space=space, fiber_bundle=fiber_bundle, signature=signature)
+        self.method = method
+        self.threshold = threshold
+        self.n_discretization = n_discretization
+        self.max_slope = max_slope
+        self.n_times = n_times
     
     def _check_ambient_manifold(self, ambient_manifold):
         if not isinstance(ambient_manifold, Euclidean):
@@ -2707,7 +2719,11 @@ class SRVReparametrizationMetric(QuotientMetric, PullbackDiffeoMetric):
         discrete_curves = DiscreteCurves(
             space.ambient_manifold, space.k_sampling_points, equip=True)
         discrete_curves.equip_with_group_action("reparametrizations and translations")
-        discrete_curves.equip_with_quotient_structure()
+        discrete_curves.equip_with_quotient_structure(method=self.method,
+                                                      threshold=self.threshold,
+                                                      n_discretization=self.n_discretization,
+                                                      max_slope=self.max_slope,
+                                                      n_times=self.n_times)
         
         factors = [space.ambient_manifold, discrete_curves.quotient]
         embedding_space = ProductManifold(

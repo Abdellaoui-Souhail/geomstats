@@ -100,7 +100,7 @@ class Manifold(abc.ABC):
             if not hasattr(self, structure_name):
                 raise ValueError(f"Need to equip with `{structure_name}` first")
 
-    def equip_with_quotient_structure(self):
+    def equip_with_quotient_structure(self, **metric_kwargs):
         """Equip manifold with quotient structure.
 
         Creates attributes `quotient` and `fiber_bundle`.
@@ -117,7 +117,7 @@ class Manifold(abc.ABC):
         self.fiber_bundle = FiberBundle_(total_space=self)
 
         self.quotient = self.new(equip=False)
-        self.quotient.equip_with_metric(QuotientMetric_, fiber_bundle=self.fiber_bundle)
+        self.quotient.equip_with_metric(QuotientMetric_, fiber_bundle=self.fiber_bundle, **metric_kwargs)
 
     @abc.abstractmethod
     def belongs(self, point, atol=gs.atol):
