@@ -2438,12 +2438,12 @@ class SRVReparametrizationTranslationMetric(QuotientMetric):
     def __init__(self, space, fiber_bundle, signature=None,
                  method="iterative horizontal projection", threshold=1e-3,
                  n_discretization=100, max_slope=10, n_times=20):
-        super().__init__(space=space, fiber_bundle=fiber_bundle, signature=signature)
         self.method = method
         self.threshold = threshold
         self.n_discretization = n_discretization
         self.max_slope = max_slope
         self.n_times = n_times
+        super().__init__(space=space, fiber_bundle=fiber_bundle, signature=signature)
     
     def geodesic(
         self,
@@ -2507,7 +2507,7 @@ class SRVReparametrizationTranslationMetric(QuotientMetric):
         """
         if self.method == "iterative horizontal projection":
             horizontal_path = self.geodesic(
-                initial_point=point_a, end_point=point_b, threshold=self.threshold
+                initial_point=point_a, end_point=point_b,
             )
             times = gs.linspace(0.0, 1.0, self.n_times)
             horizontal_geod = horizontal_path(times)
@@ -2697,12 +2697,12 @@ class SRVReparametrizationMetric(QuotientMetric, PullbackDiffeoMetric):
     def __init__(self, space, fiber_bundle, signature=None,
                  method="iterative horizontal projection", threshold=1e-3,
                  n_discretization=100, max_slope=10, n_times=20):
-        super().__init__(space=space, fiber_bundle=fiber_bundle, signature=signature)
         self.method = method
         self.threshold = threshold
         self.n_discretization = n_discretization
         self.max_slope = max_slope
         self.n_times = n_times
+        super().__init__(space=space, fiber_bundle=fiber_bundle, signature=signature)
     
     def _check_ambient_manifold(self, ambient_manifold):
         if not isinstance(ambient_manifold, Euclidean):

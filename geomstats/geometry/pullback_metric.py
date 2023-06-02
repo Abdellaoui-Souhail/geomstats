@@ -446,7 +446,7 @@ class PullbackDiffeoMetric(RiemannianMetric, abc.ABC):
         )
         return self.inverse_tangent_diffeomorphism(image_log, image_base_point)
 
-    def dist(self, point_a, point_b, **kwargs):
+    def dist(self, point_a, point_b):
         """Compute the distance via diffeomorphic pullback.
 
         Parameters
@@ -463,9 +463,9 @@ class PullbackDiffeoMetric(RiemannianMetric, abc.ABC):
         """
         image_point_a = self.diffeomorphism(point_a)
         image_point_b = self.diffeomorphism(point_b)
-        return self.embedding_space.metric.dist(image_point_a, image_point_b, **kwargs)
+        return self.embedding_space.metric.dist(image_point_a, image_point_b)
     
-    def geodesic(self, initial_point, end_point=None, initial_tangent_vec=None, **kwargs):
+    def geodesic(self, initial_point, end_point=None, initial_tangent_vec=None):
         """Compute the geodesic via diffeomorphic pullback.
 
         Parameters
@@ -490,7 +490,7 @@ class PullbackDiffeoMetric(RiemannianMetric, abc.ABC):
             image_initial_tangent_vec = None
         else :
             image_initial_tangent_vec = self.tangent_diffeomorphism(initial_tangent_vec, initial_point)
-        image_geodesic = self.embedding_space.metric.geodesic(image_point_a, image_point_b, image_initial_tangent_vec, **kwargs)
+        image_geodesic = self.embedding_space.metric.geodesic(image_point_a, image_point_b, image_initial_tangent_vec)
         
         def geod_function(t):
             image_point_t = image_geodesic(t)  
