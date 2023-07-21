@@ -1166,7 +1166,7 @@ class ElasticMetric(PullbackDiffeoMetric):
         return path
 
 
-class _SRVMetric(PullbackDiffeoMetric):
+class SRVMetric(PullbackDiffeoMetric):
     """Square Root Velocity metric on the space of discrete curves.
 
     The SRV metric is equivalent to the elastic metric chosen with
@@ -1195,6 +1195,143 @@ class _SRVMetric(PullbackDiffeoMetric):
         space,
     ):
         super().__init__(space=space)
+
+    def _check_ambient_manifold(self, ambient_manifold):
+        if not isinstance(ambient_manifold, Euclidean):
+            raise AssertionError(
+                "This metric is only "
+                "implemented for discrete curves embedded "
+                "in a Euclidean space."
+            )
+
+    def _define_embedding_space(self):
+        r"""Define embedding space with metric to pull back.
+        """
+        space = self._space
+        discrete_curves = DiscreteCurves(
+            space.ambient_manifold, space.k_sampling_points, equip=False)
+        discrete_curves.equip_with_metric(SRVTranslationMetric, fiber_bundle=SRVTranslationBundle)
+        
+        factors = [space.ambient_manifold, discrete_curves]
+        embedding_space = ProductManifold(
+            factors = factors, default_point_type="auto")
+        return embedding_space
+
+    def diffeomorphism(self, curves):
+        r"""
+        """
+        curve_ndim = gs.ndim(curves)
+        curves = gs.to_ndarray(curves, to_ndim=3)
+        n_curves, k_sampling_points, dim = curves.shape
+
+        
+        starting_point = curves[:,0,:]
+        starting_points = copy.deepcopy(curves[:,0,:])
+        starting_points = starting_points[:,None,:].repeat(k_sampling_points,axis=1)
+        curves_start_origin = curves - starting_points
+
+        result = gs.zeros((n_curves,k_sampling_points+1,dim),dtype=float)
+        
+        if curve_ndim == 2:
+            result[:,0,:] = starting_point
+            result[:,1:,:] = curves_start_origin
+            result = gs.squeeze(result)
+            result = result.flatten()
+            return result
+
+        result[:,0,:] = starting_point
+        result[:,1:,:] = curves_start_origin
+        result = gs.reshape(result, (n_curves, (k_sampling_points+1)*dim) )
+        return result
+
+    def inverse_diffeomorphism(self, image_point):
+        r"""Inverse diffeomorphism at image point.
+        """
+        
+        dim = self._space.ambient_manifold.dim
+        k_sampling_points = self._space.k_sampling_points
+        
+        curve_ndim = gs.ndim(image_point)
+        image_points = gs.to_ndarray(image_point, to_ndim=2)
+        n_curves, _ = image_points.shape
+        starting_points = image_points[:,:dim]
+        curves_start_origin_flatten = image_points[:,dim:]
+        curves_start_origin = curves_start_origin_flatten.reshape((n_curves,k_sampling_points,dim))
+        
+        
+        starting_points = starting_points[:,None,:].repeat(k_sampling_points,axis=1)
+
+        curves = curves_start_origin + starting_points
+
+        if curve_ndim == 1:
+            return gs.squeeze(curves)
+        
+        return curves
+
+    def tangent_diffeomorphism(self, tangent_vec, point):
+        r"""
+        """
+        return self.diffeomorphism(tangent_vec)
+
+    def inverse_tangent_diffeomorphism(self, tangent_vec, image_point):
+        r"""
+        """
+        return self.inverse_diffeomorphism(tangent_vec)
+
+
+class SRVTranslationBundle(FiberBundle):
+    
+    def __init__(self, total_space):
+        super().__init__(total_space=total_space, group_action="Translation")
+        self._srvmetric = SRVTranslationMetric(space=total_space, fiber_bundle=SRVTranslationBundle)
+    
+    def riemannian_submersion(self, point):
+        point_ndim = gs.ndim(point)
+        point = gs.to_ndarray(point, to_ndim=3)
+        n_points, k_sampling_points, dim = point.shape
+
+        
+        starting_point = point[:,0,:]
+        starting_points = copy.deepcopy(point[:,0,:])
+        starting_points = starting_points[:,None,:].repeat(k_sampling_points,axis=1)
+        result = point - starting_points
+
+        if point_ndim == 2:
+            return gs.squeeze(result)
+        return result
+    
+    def horizontal_projection(self, tangent_vec, base_point):
+        return self.riemannian_submersion(tangent_vec)
+    
+    def align (self, base_point, point):
+        point_ndim = gs.ndim(point)
+        base_point_ndim = gs.ndim(base_point)
+        
+        if base_point_ndim != point_ndim : 
+            raise AssertionError(
+                "Point and Base_Point should have the same dimension.")
+        
+        point = gs.to_ndarray(point, to_ndim=3)
+        base_point = gs.to_ndarray(base_point, to_ndim=3)
+        n_points, k_sampling_points, dim = point.shape
+
+        
+        starting_point = point[:,0,:]
+        starting_base_point = base_point[:,0,:]
+        translation = starting_base_point - starting_point
+        translations = copy.deepcopy(point[:,0,:])
+        translations = translations[:,None,:].repeat(k_sampling_points,axis=1)
+        result = point + translation
+
+        if point_ndim == 2:
+            return gs.squeeze(result)
+        return result
+
+
+class SRVTranslationMetric(QuotientMetric, PullbackDiffeoMetric):
+
+    def __init__(self, space, fiber_bundle, signature=None):
+        super().__init__(space=space, fiber_bundle=fiber_bundle, signature=signature)
 
     def _check_ambient_manifold(self, ambient_manifold):
         if not isinstance(ambient_manifold, Euclidean):
@@ -1493,195 +1630,6 @@ class _SRVMetric(PullbackDiffeoMetric):
         mat_space_deriv = mat_1 - mat_2 + mat_3
 
         return n_points * gs.matmul(mat_space_deriv, curve)
-
-
-class SRVMetric(PullbackDiffeoMetric):
-    """Square Root Velocity metric on the space of discrete curves.
-
-    The SRV metric is equivalent to the elastic metric chosen with
-    - bending parameter a = 1,
-    - stretching parameter b = 1/2.
-    It can be obtained as the pullback of the L2 metric by the Square Root
-    Velocity Function.
-
-    See [Sea2011]_ for details.
-
-    Parameters
-    ----------
-    translation_invariant : bool
-        Optional, default : True.
-
-    References
-    ----------
-    .. [Sea2011] A. Srivastava, E. Klassen, S. H. Joshi and I. H. Jermyn,
-        "Shape Analysis of Elastic Curves in Euclidean Spaces,"
-        in IEEE Transactions on Pattern Analysis and Machine Intelligence,
-        vol. 33, no. 7, pp. 1415-1428, July 2011.
-    """
-
-    def __init__(
-        self,
-        space,
-    ):
-        super().__init__(space=space)
-
-    def _check_ambient_manifold(self, ambient_manifold):
-        if not isinstance(ambient_manifold, Euclidean):
-            raise AssertionError(
-                "This metric is only "
-                "implemented for discrete curves embedded "
-                "in a Euclidean space."
-            )
-
-    def _define_embedding_space(self):
-        r"""Define embedding space with metric to pull back.
-        """
-        space = self._space
-        discrete_curves = DiscreteCurves(
-            space.ambient_manifold, space.k_sampling_points, equip=False)
-        discrete_curves.equip_with_metric(_SRVMetric)
-        
-        factors = [space.ambient_manifold, discrete_curves]
-        embedding_space = ProductManifold(
-            factors = factors, default_point_type="auto")
-        return embedding_space
-
-    def diffeomorphism(self, curves):
-        r"""
-        """
-        curve_ndim = gs.ndim(curves)
-        curves = gs.to_ndarray(curves, to_ndim=3)
-        n_curves, k_sampling_points, dim = curves.shape
-
-        
-        starting_point = curves[:,0,:]
-        starting_points = copy.deepcopy(curves[:,0,:])
-        starting_points = starting_points[:,None,:].repeat(k_sampling_points,axis=1)
-        curves_start_origin = curves - starting_points
-        
-        """
-        result = gs.zeros(2,dtype=object)
-
-        if curve_ndim == 2:
-            result[0] = gs.squeeze(starting_point)
-            result[1] = gs.squeeze(curves_start_origin)
-            print(result)
-            return result
-
-        result[0] = starting_point
-        result[1] = curves_start_origin
-        return [starting_point,curves_start_origin]
-        """
-
-        result = gs.zeros((n_curves,k_sampling_points+1,dim),dtype=float)
-        
-        if curve_ndim == 2:
-            result[:,0,:] = starting_point
-            result[:,1:,:] = curves_start_origin
-            result = gs.squeeze(result)
-            result = result.flatten()
-            return result
-
-        result[:,0,:] = starting_point
-        result[:,1:,:] = curves_start_origin
-        result = gs.reshape(result, (n_curves, (k_sampling_points+1)*dim) )
-        return result
-
-    def inverse_diffeomorphism(self, image_point):
-        r"""Inverse diffeomorphism at image point.
-        """
-        
-        dim = self._space.ambient_manifold.dim
-        k_sampling_points = self._space.k_sampling_points
-        
-        curve_ndim = gs.ndim(image_point)
-        image_points = gs.to_ndarray(image_point, to_ndim=2)
-        n_curves, _ = image_points.shape
-        starting_points = image_points[:,:dim]
-        curves_start_origin_flatten = image_points[:,dim:]
-        curves_start_origin = curves_start_origin_flatten.reshape((n_curves,k_sampling_points,dim))
-        
-        
-        starting_points = starting_points[:,None,:].repeat(k_sampling_points,axis=1)
-
-        curves = curves_start_origin + starting_points
-
-        if curve_ndim == 1:
-            return gs.squeeze(curves)
-        
-        return curves
-
-    def tangent_diffeomorphism(self, tangent_vec, point):
-        r"""
-        """
-        return self.diffeomorphism(tangent_vec)
-
-    def inverse_tangent_diffeomorphism(self, tangent_vec, image_point):
-        r"""
-        """
-        return self.inverse_diffeomorphism(tangent_vec)
-
-
-class SRVTranslationBundle(FiberBundle):
-    
-    def __init__(self, total_space):
-        super().__init__(total_space=total_space, group_action="Translation")
-        self._srvmetric = _SRVMetric(space=total_space)
-    
-    def riemannian_submersion(self, point):
-        point_ndim = gs.ndim(point)
-        point = gs.to_ndarray(point, to_ndim=3)
-        n_points, k_sampling_points, dim = point.shape
-
-        
-        starting_point = point[:,0,:]
-        starting_points = copy.deepcopy(point[:,0,:])
-        starting_points = starting_points[:,None,:].repeat(k_sampling_points,axis=1)
-        result = point - starting_points
-
-        if point_ndim == 2:
-            return gs.squeeze(result)
-        return result
-    
-    def horizontal_projection(self, tangent_vec, base_point):
-        return self.riemannian_submersion(tangent_vec)
-    
-    def align (self, base_point, point):
-        point_ndim = gs.ndim(point)
-        base_point_ndim = gs.ndim(base_point)
-        
-        if base_point_ndim != point_ndim : 
-            raise AssertionError(
-                "Point and Base_Point should have the same dimension.")
-        
-        point = gs.to_ndarray(point, to_ndim=3)
-        base_point = gs.to_ndarray(base_point, to_ndim=3)
-        n_points, k_sampling_points, dim = point.shape
-
-        
-        starting_point = point[:,0,:]
-        starting_base_point = base_point[:,0,:]
-        translation = starting_base_point - starting_point
-        translations = copy.deepcopy(point[:,0,:])
-        translations = translations[:,None,:].repeat(k_sampling_points,axis=1)
-        result = point + translation
-
-        if point_ndim == 2:
-            return gs.squeeze(result)
-        return result
-
-
-class SRVTranslationMetric(QuotientMetric):
-    
-    def __init__(self, space, fiber_bundle, signature=None):
-        super().__init__(space=space, fiber_bundle=fiber_bundle, signature=signature)
-        self._srvmetric = _SRVMetric(space)
-    
-    def geodesic(self, initial_point, end_point=None, initial_tangent_vec=None):
-        return self._srvmetric.geodesic(initial_point, end_point, initial_tangent_vec)
-    
-    def dist(self, point_a, point_b):
-        return self._srvmetric.dist(point_a, point_b)
 
 
 class SRVReparametrizationTranslationBundle(FiberBundle):
@@ -2011,7 +1959,7 @@ class SRVReparametrizationTranslationBundle(FiberBundle):
                     time_deriv, geod[:-1], return_norm=True
                 )
 
-                space_deriv = _SRVMetric.space_derivative(geod)
+                space_deriv = SRVTranslationMetric.space_derivative(geod)
                 space_deriv_norm = self.total_space.ambient_manifold.metric.norm(
                     space_deriv
                 )

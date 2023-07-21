@@ -6,7 +6,8 @@ from geomstats.geometry.discrete_curves import (
     DiscreteCurves,
     L2CurvesMetric,
     SRVMetric,
-    SRVShapeBundle,
+    SRVReparametrizationTranslationBundle,
+
 )
 from geomstats.geometry.euclidean import Euclidean
 from geomstats.geometry.hypersphere import Hypersphere
@@ -17,8 +18,10 @@ from tests.data.discrete_curves_data import (
     ElasticMetricTestData,
     L2CurvesMetricTestData,
     SRVMetricTestData,
-    SRVQuotientMetricTestData,
-    SRVShapeBundleTestData,
+    SRVTranslationMetricTestData,
+    SRVReparametrizationTranslationBundleTestData,
+    SRVReparametrizationTranslationMetricTestData,
+    SRVReparametrizationMetricTestData,
 )
 from tests.geometry_test_cases import (
     ManifoldTestCase,
@@ -93,6 +96,129 @@ class TestL2CurvesMetric(RiemannianMetricTestCase, metaclass=Parametrizer):
         self.assertAllClose(result, expected)
 
 
+class TestElasticMetric(RiemannianMetricTestCase, metaclass=Parametrizer):
+    skip_test_exp_shape = True
+    skip_test_log_shape = True
+    skip_test_exp_geodesic_ivp = True
+    skip_test_parallel_transport_ivp_is_isometry = True
+    skip_test_parallel_transport_bvp_is_isometry = True
+    skip_test_exp_after_log = True
+    skip_test_exp_belongs = True
+    skip_test_exp_ladder_parallel_transport = True
+    skip_test_inner_product_is_symmetric = True
+    skip_test_log_after_exp = True
+    skip_test_log_is_tangent = True
+    skip_test_dist_is_norm_of_log = True
+    skip_test_dist_point_to_itself_is_zero = True
+    skip_test_triangle_inequality_of_dist = True
+    skip_test_geodesic_ivp_belongs = True
+    skip_test_covariant_riemann_tensor_is_skew_symmetric_1 = True
+    skip_test_covariant_riemann_tensor_is_skew_symmetric_2 = True
+    skip_test_covariant_riemann_tensor_bianchi_identity = True
+    skip_test_covariant_riemann_tensor_is_interchange_symmetric = True
+    skip_test_riemann_tensor_shape = True
+    skip_test_scalar_curvature_shape = True
+    skip_test_ricci_tensor_shape = True
+    skip_test_sectional_curvature_shape = True
+
+    testing_data = ElasticMetricTestData()
+
+    def test_cartesian_to_polar_and_polar_to_cartesian(
+        self, space, a, b, n_samples, rtol, atol
+    ):
+        """Test conversion to polar coordinate"""
+        space.equip_with_metric(self.Metric, a=a, b=b)
+
+        curve = space.random_point(n_samples=n_samples)
+        polar_curve = space.metric._cartesian_to_polar(curve)
+        result = space.metric._polar_to_cartesian(polar_curve)
+
+        self.assertAllClose(result, curve, rtol=rtol, atol=atol)
+
+    def test_f_transform_and_srv_transform(self, space, n_samples, rtol, atol):
+        """Test that the f transform coincides with the SRVF.
+
+        This is valid for a f_transform with a=1, b=1/2.
+        """
+        curve = space.random_point(n_samples)
+
+        space.equip_with_metric(self.Metric, a=1.0, b=0.5)
+        result = space.metric.f_transform(curve)
+
+        space.equip_with_metric(SRVMetric)
+        expected = space.metric.f_transform(curve)
+
+        self.assertAllClose(result, expected, rtol, atol)
+
+    def test_f_transform_inverse_and_srv_transform_inverse(
+        self, space, curve, rtol, atol
+    ):
+        """Test that the f transform coincides with the SRVF
+
+        This is valid for a f transform with a=1, b=1/2.
+        """
+        space.equip_with_metric(self.Metric, a=1, b=0.5)
+
+        starting_point = curve[0]
+        fake_transformed_curve = curve[1:, :]
+
+        result = space.metric.f_transform_inverse(
+            fake_transformed_curve, starting_point
+        )
+
+        space.equip_with_metric(SRVMetric)
+        expected = space.metric.f_transform_inverse(
+            fake_transformed_curve, starting_point
+        )
+        self.assertAllClose(result, expected, rtol, atol)
+
+    def test_f_transform_and_f_transform_inverse(self, space, a, b, curve, rtol, atol):
+        """Test that the inverse is right."""
+        space.equip_with_metric(self.Metric, a=a, b=b)
+
+        f = space.metric.f_transform(curve)
+        f_inverse = space.metric.f_transform_inverse(f, curve[0])
+
+        result = f.shape
+        expected = (curve.shape[0] - 1, 2)
+        self.assertAllClose(result, expected)
+
+        result = f_inverse
+        expected = curve
+        self.assertAllClose(result, expected, rtol, atol)
+
+    def test_f_transform_and_diffeomorphism(self, space, a, b, n_samples, rtol, atol):
+        """Test that f_transform coincides with
+        diffeomorphism.
+        """
+        space.equip_with_metric(self.Metric, a=a, b=b)
+
+        curves = space.random_point(n_samples=n_samples)
+
+        result = space.metric.f_transform(curves)
+        expected = space.metric.diffeomorphism(curves)
+
+        self.assertAllClose(result, expected, rtol, atol)
+
+    def test_f_transform_inverse_and_inverse_diffeomorphism(
+        self, space, a, b, curve, rtol, atol
+    ):
+        """Test that the f transform inverse coincides
+        with the inverse diffeomorphism when starting at 0.
+        """
+        space.equip_with_metric(self.Metric, a=a, b=b)
+
+        starting_point = gs.zeros(gs.shape(curve[..., 0, :]))
+        fake_transformed_curve = curve[1:, :]
+
+        result = space.metric.inverse_diffeomorphism(fake_transformed_curve)
+        expected = space.metric.f_transform_inverse(
+            fake_transformed_curve, starting_point
+        )
+
+        self.assertAllClose(result, expected, rtol, atol)
+
+
 class TestSRVMetric(RiemannianMetricTestCase, metaclass=Parametrizer):
     skip_test_exp_geodesic_ivp = True
     skip_test_parallel_transport_ivp_is_isometry = True
@@ -109,6 +235,50 @@ class TestSRVMetric(RiemannianMetricTestCase, metaclass=Parametrizer):
     skip_test_sectional_curvature_shape = True
 
     testing_data = SRVMetricTestData()
+
+    def test_diffeomorphism_and_inverse_diffeomorphism(self, space, rtol, atol):
+        """Test that srv and its inverse are inverse."""
+        space.equip_with_metric(self.Metric)
+        curve = space.random_point(n_samples=2)
+
+        image = space.metric.diffeomorphism(curve)
+        inverse_image = space.metric.inverse_diffeomorphism(image)
+
+        result = inverse_image
+        expected = curve
+        self.assertAllClose(result, expected, rtol, atol)
+    
+    def test_tangent_diffeomorphism_and_inverse_tangent(self, space, rtol, atol):
+        
+        space.equip_with_metric(self.Metric)
+        curve = space.random_point(n_samples=2)
+        tangent_vec = space.random_point(n_samples=2)
+
+        image_curve = space.diffeomorphism(curve)
+        image_tangent = space.tangent_diffeomorphism(tangent_vec, curve)
+        inverse_image = space.inverse_tangent_diffeomorphism(image_tangent, image_curve)
+
+        result = inverse_image
+        expected = curve
+        self.assertAllClose(result, expected, rtol, atol)
+
+
+class TestSRVTranslationMetric(RiemannianMetricTestCase, metaclass=Parametrizer):
+    skip_test_exp_geodesic_ivp = True
+    skip_test_parallel_transport_ivp_is_isometry = True
+    skip_test_parallel_transport_bvp_is_isometry = True
+    skip_test_geodesic_bvp_belongs = True
+    skip_test_geodesic_ivp_belongs = True
+    skip_test_covariant_riemann_tensor_is_skew_symmetric_1 = True
+    skip_test_covariant_riemann_tensor_is_skew_symmetric_2 = True
+    skip_test_covariant_riemann_tensor_bianchi_identity = True
+    skip_test_covariant_riemann_tensor_is_interchange_symmetric = True
+    skip_test_riemann_tensor_shape = True
+    skip_test_scalar_curvature_shape = True
+    skip_test_ricci_tensor_shape = True
+    skip_test_sectional_curvature_shape = True
+
+    testing_data = SRVTranslationMetricTestData()
 
     def test_srv_transform_and_srv_transform_inverse(self, space, rtol, atol):
         """Test that srv and its inverse are inverse."""
@@ -359,131 +529,8 @@ class TestSRVMetric(RiemannianMetricTestCase, metaclass=Parametrizer):
         self.assertAllClose(result, expected)
 
 
-class TestElasticMetric(RiemannianMetricTestCase, metaclass=Parametrizer):
-    skip_test_exp_shape = True
-    skip_test_log_shape = True
-    skip_test_exp_geodesic_ivp = True
-    skip_test_parallel_transport_ivp_is_isometry = True
-    skip_test_parallel_transport_bvp_is_isometry = True
-    skip_test_exp_after_log = True
-    skip_test_exp_belongs = True
-    skip_test_exp_ladder_parallel_transport = True
-    skip_test_inner_product_is_symmetric = True
-    skip_test_log_after_exp = True
-    skip_test_log_is_tangent = True
-    skip_test_dist_is_norm_of_log = True
-    skip_test_dist_point_to_itself_is_zero = True
-    skip_test_triangle_inequality_of_dist = True
-    skip_test_geodesic_ivp_belongs = True
-    skip_test_covariant_riemann_tensor_is_skew_symmetric_1 = True
-    skip_test_covariant_riemann_tensor_is_skew_symmetric_2 = True
-    skip_test_covariant_riemann_tensor_bianchi_identity = True
-    skip_test_covariant_riemann_tensor_is_interchange_symmetric = True
-    skip_test_riemann_tensor_shape = True
-    skip_test_scalar_curvature_shape = True
-    skip_test_ricci_tensor_shape = True
-    skip_test_sectional_curvature_shape = True
-
-    testing_data = ElasticMetricTestData()
-
-    def test_cartesian_to_polar_and_polar_to_cartesian(
-        self, space, a, b, n_samples, rtol, atol
-    ):
-        """Test conversion to polar coordinate"""
-        space.equip_with_metric(self.Metric, a=a, b=b)
-
-        curve = space.random_point(n_samples=n_samples)
-        polar_curve = space.metric._cartesian_to_polar(curve)
-        result = space.metric._polar_to_cartesian(polar_curve)
-
-        self.assertAllClose(result, curve, rtol=rtol, atol=atol)
-
-    def test_f_transform_and_srv_transform(self, space, n_samples, rtol, atol):
-        """Test that the f transform coincides with the SRVF.
-
-        This is valid for a f_transform with a=1, b=1/2.
-        """
-        curve = space.random_point(n_samples)
-
-        space.equip_with_metric(self.Metric, a=1.0, b=0.5)
-        result = space.metric.f_transform(curve)
-
-        space.equip_with_metric(SRVMetric)
-        expected = space.metric.f_transform(curve)
-
-        self.assertAllClose(result, expected, rtol, atol)
-
-    def test_f_transform_inverse_and_srv_transform_inverse(
-        self, space, curve, rtol, atol
-    ):
-        """Test that the f transform coincides with the SRVF
-
-        This is valid for a f transform with a=1, b=1/2.
-        """
-        space.equip_with_metric(self.Metric, a=1, b=0.5)
-
-        starting_point = curve[0]
-        fake_transformed_curve = curve[1:, :]
-
-        result = space.metric.f_transform_inverse(
-            fake_transformed_curve, starting_point
-        )
-
-        space.equip_with_metric(SRVMetric)
-        expected = space.metric.f_transform_inverse(
-            fake_transformed_curve, starting_point
-        )
-        self.assertAllClose(result, expected, rtol, atol)
-
-    def test_f_transform_and_f_transform_inverse(self, space, a, b, curve, rtol, atol):
-        """Test that the inverse is right."""
-        space.equip_with_metric(self.Metric, a=a, b=b)
-
-        f = space.metric.f_transform(curve)
-        f_inverse = space.metric.f_transform_inverse(f, curve[0])
-
-        result = f.shape
-        expected = (curve.shape[0] - 1, 2)
-        self.assertAllClose(result, expected)
-
-        result = f_inverse
-        expected = curve
-        self.assertAllClose(result, expected, rtol, atol)
-
-    def test_f_transform_and_diffeomorphism(self, space, a, b, n_samples, rtol, atol):
-        """Test that f_transform coincides with
-        diffeomorphism.
-        """
-        space.equip_with_metric(self.Metric, a=a, b=b)
-
-        curves = space.random_point(n_samples=n_samples)
-
-        result = space.metric.f_transform(curves)
-        expected = space.metric.diffeomorphism(curves)
-
-        self.assertAllClose(result, expected, rtol, atol)
-
-    def test_f_transform_inverse_and_inverse_diffeomorphism(
-        self, space, a, b, curve, rtol, atol
-    ):
-        """Test that the f transform inverse coincides
-        with the inverse diffeomorphism when starting at 0.
-        """
-        space.equip_with_metric(self.Metric, a=a, b=b)
-
-        starting_point = gs.zeros(gs.shape(curve[..., 0, :]))
-        fake_transformed_curve = curve[1:, :]
-
-        result = space.metric.inverse_diffeomorphism(fake_transformed_curve)
-        expected = space.metric.f_transform_inverse(
-            fake_transformed_curve, starting_point
-        )
-
-        self.assertAllClose(result, expected, rtol, atol)
-
-
-class TestSRVShapeBundle(TestCase, metaclass=Parametrizer):
-    testing_data = SRVShapeBundleTestData()
+class TestSRVReparametrizationTranslationBundle(TestCase, metaclass=Parametrizer):
+    testing_data = SRVReparametrizationTranslationBundleTestData()
 
     def test_horizontal_and_vertical_projections(
         self, times, n_discretized_curves, curve_a, curve_b
@@ -495,7 +542,7 @@ class TestSRVShapeBundle(TestCase, metaclass=Parametrizer):
         """
         total_space = DiscreteCurves(r3, equip=True)
         srv_metric_r3 = total_space.metric
-        srv_shape_bundle_r3 = SRVShapeBundle(total_space)
+        srv_shape_bundle_r3 = SRVReparametrizationTranslationBundle(total_space)
 
         geod = srv_metric_r3.geodesic(initial_point=curve_a, end_point=curve_b)
         geod = geod(times)
@@ -539,7 +586,7 @@ class TestSRVShapeBundle(TestCase, metaclass=Parametrizer):
         )
 
         total_space = DiscreteCurves(r3, equip=True)
-        srv_shape_bundle_r3 = SRVShapeBundle(total_space)
+        srv_shape_bundle_r3 = SRVReparametrizationTranslationBundle(total_space)
 
         method = type_method[0]
         threshold = type_method[1]
@@ -558,8 +605,8 @@ class TestSRVShapeBundle(TestCase, metaclass=Parametrizer):
         self.assertAllClose(result, expected, atol=threshold)
 
 
-class TestSRVQuotientMetric(TestCase, metaclass=Parametrizer):
-    testing_data = SRVQuotientMetricTestData()
+class TestSRVReparametrizationTranslationMetric(RiemannianMetricTestCase, metaclass=Parametrizer):
+    testing_data = SRVReparametrizationTranslationMetricTestData()
 
     def test_dist(self, sampling_times, curve_fun_a, curve_a, k_sampling_points):
         """Test quotient distance.
@@ -586,3 +633,48 @@ class TestSRVQuotientMetric(TestCase, metaclass=Parametrizer):
         result = srv_quotient_metric_r3.dist(curve_a_resampled, curve_b)
         expected = srv_quotient_metric_r3.dist(curve_a, curve_b)
         self.assertAllClose(result, expected, atol=1e-3, rtol=1e-3)
+
+
+class TestSRVReparametrizationMetric(RiemannianMetricTestCase, metaclass=Parametrizer):
+    skip_test_exp_geodesic_ivp = True
+    skip_test_parallel_transport_ivp_is_isometry = True
+    skip_test_parallel_transport_bvp_is_isometry = True
+    skip_test_geodesic_bvp_belongs = True
+    skip_test_geodesic_ivp_belongs = True
+    skip_test_covariant_riemann_tensor_is_skew_symmetric_1 = True
+    skip_test_covariant_riemann_tensor_is_skew_symmetric_2 = True
+    skip_test_covariant_riemann_tensor_bianchi_identity = True
+    skip_test_covariant_riemann_tensor_is_interchange_symmetric = True
+    skip_test_riemann_tensor_shape = True
+    skip_test_scalar_curvature_shape = True
+    skip_test_ricci_tensor_shape = True
+    skip_test_sectional_curvature_shape = True
+
+    testing_data = SRVReparametrizationMetricTestData()
+
+    def test_diffeomorphism_and_inverse_diffeomorphism(self, space, rtol, atol):
+        """Test that srv and its inverse are inverse."""
+        space.equip_with_metric(self.Metric)
+        curve = space.random_point(n_samples=2)
+
+        image = space.metric.diffeomorphism(curve)
+        inverse_image = space.metric.inverse_diffeomorphism(image)
+
+        result = inverse_image
+        expected = curve
+        self.assertAllClose(result, expected, rtol, atol)
+    
+    def test_tangent_diffeomorphism_and_inverse_tangent(self, space, rtol, atol):
+        
+        space.equip_with_metric(self.Metric)
+        curve = space.random_point(n_samples=2)
+        tangent_vec = space.random_point(n_samples=2)
+
+        image_curve = space.diffeomorphism(curve)
+        image_tangent = space.tangent_diffeomorphism(tangent_vec, curve)
+        inverse_image = space.inverse_tangent_diffeomorphism(image_tangent, image_curve)
+
+        result = inverse_image
+        expected = curve
+        self.assertAllClose(result, expected, rtol, atol)
+

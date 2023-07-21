@@ -106,6 +106,147 @@ class L2CurvesMetricTestData(_RiemannianMetricTestData):
         return self.generate_tests(smoke_data)
 
 
+class ElasticMetricTestData(_RiemannianMetricTestData):
+    n_samples_list = [1, 5]
+    a_list = [1, 2]
+    b_list = [2, 5]
+    a_b_list = list(zip(a_list, b_list))
+
+    ambient_manifolds_list = [r2] * len(a_b_list)
+    shape_list = [(10, 2), (10, 2)]
+    space_list = [
+        DiscreteCurves(ambient_manifold, equip=False)
+        for ambient_manifold in ambient_manifolds_list
+    ]
+    connection_args_list = metric_args_list = [{"a": a, "b": b} for a, b in a_b_list]
+
+    n_points_list = random.sample(range(2, 5), 2)
+    n_tangent_vecs_list = random.sample(range(2, 5), 2)
+    n_points_a_list = [1, 2]
+    n_points_b_list = [1, 2]
+    alpha_list = [1] * 2
+    n_rungs_list = [1] * 2
+    scheme_list = ["pole"] * 2
+
+    Metric = ElasticMetric
+
+    def cartesian_to_polar_and_polar_to_cartesian_test_data(self):
+        smoke_data = []
+        for n_samples in self.n_samples_list:
+            for a, b in self.a_b_list:
+                smoke_data.append(
+                    dict(
+                        space=DiscreteCurves(
+                            ambient_manifold=r2, start_at_the_origin=False, equip=False
+                        ),
+                        a=a,
+                        b=b,
+                        n_samples=n_samples,
+                        rtol=10 * gs.rtol,
+                        atol=10 * gs.atol,
+                    )
+                )
+
+        return self.generate_tests(smoke_data)
+
+    def f_transform_and_srv_transform_test_data(self):
+        smoke_data = [
+            dict(
+                space=DiscreteCurves(
+                    ambient_manifold=r2, start_at_the_origin=True, equip=False
+                ),
+                n_samples=n_samples,
+                rtol=gs.rtol,
+                atol=gs.atol,
+            )
+            for n_samples in self.n_samples_list
+        ]
+        return self.generate_tests(smoke_data)
+
+    def f_transform_inverse_and_srv_transform_inverse_test_data(self):
+        smoke_data = [
+            dict(
+                space=DiscreteCurves(
+                    ambient_manifold=r2, start_at_the_origin=True, equip=False
+                ),
+                curve=gs.stack([curve_a[:, 0], curve_a[:, 2]], axis=-1),
+                rtol=10 * gs.rtol,
+                atol=10 * gs.atol,
+            )
+        ]
+        return self.generate_tests(smoke_data)
+
+    def f_transform_and_f_transform_inverse_test_data(self):
+        smoke_data = [
+            dict(
+                space=DiscreteCurves(
+                    ambient_manifold=r2, start_at_the_origin=True, equip=False
+                ),
+                curve=gs.stack([curve_a[:, 0], curve_a[:, 2]], axis=-1),
+                a=a,
+                b=b,
+                rtol=10 * gs.rtol,
+                atol=10 * gs.atol,
+            )
+            for a, b in self.a_b_list
+        ]
+        return self.generate_tests(smoke_data)
+
+    def f_transform_and_diffeomorphism_test_data(self):
+        smoke_data = []
+        for n_samples in self.n_samples_list:
+            for a, b in self.a_b_list:
+                smoke_data.append(
+                    dict(
+                        space=DiscreteCurves(
+                            ambient_manifold=r2, start_at_the_origin=True, equip=False
+                        ),
+                        a=a,
+                        b=b,
+                        n_samples=n_samples,
+                        rtol=10 * gs.rtol,
+                        atol=10 * gs.atol,
+                    )
+                )
+
+        return self.generate_tests(smoke_data)
+
+    def f_transform_inverse_and_inverse_diffeomorphism_test_data(self):
+        smoke_data = [
+            dict(
+                space=DiscreteCurves(
+                    ambient_manifold=r2, start_at_the_origin=True, equip=False
+                ),
+                curve=gs.stack(
+                    [curve_a[:, 0], curve_a[:, 2]],
+                    axis=-1,
+                ),
+                a=a,
+                b=b,
+                rtol=10 * gs.rtol,
+                atol=10 * gs.atol,
+            )
+            for a, b in self.a_b_list
+        ]
+        return self.generate_tests(smoke_data)
+
+    def elastic_dist_test_data(self):
+        cells, _, _ = data_utils.load_cells()
+        curve_1, curve_2 = cells[0][:10], cells[1][:10]
+        smoke_data = [dict(a=1.0, b=0.5, curve_1=curve_1, curve_2=curve_2)]
+        return self.generate_tests(smoke_data)
+
+    def elastic_and_srv_dist_test_data(self):
+        smoke_data = [dict(a=1.0, b=0.5, curve_a=curve_a, curve_b=curve_b)]
+        return self.generate_tests(smoke_data)
+
+    def cartesian_to_polar_and_inverse_test_data(self):
+        cells, _, _ = data_utils.load_cells()
+        curve = cells[0]
+        smoke_data = [dict(a=1.0, b=1.0, curve=curve)]
+        return self.generate_tests(smoke_data)
+
+
 class SRVMetricTestData(_RiemannianMetricTestData):
     ambient_manifolds_list = [r2, r3]
 
@@ -124,6 +265,63 @@ class SRVMetricTestData(_RiemannianMetricTestData):
     alpha_list = [1] * 2
     n_rungs_list = [1] * 2
     scheme_list = ["pole"] * 2
+
+    n_samples_list = [1, 5]
+    a_list = [1, 2]
+    b_list = [2, 5]
+    a_b_list = list(zip(a_list, b_list))
+
+    connection_args_list = metric_args_list = [{"a": a, "b": b} for a, b in a_b_list]
+
+    Metric = SRVMetric
+
+
+    def diffeomorphism_and_inverse_diffeomorphism_test_data(self):
+        smoke_data = [
+            dict(
+                space=DiscreteCurves(ambient_manifold=r3, equip=False),
+                rtol=gs.rtol,
+                atol=gs.atol,
+            )
+        ]
+        return self.generate_tests(smoke_data)
+    
+    def tangent_diffeomorphism_and_inverse_tangent_test_data(self):
+        smoke_data = [
+            dict(
+                space=DiscreteCurves(ambient_manifold=r3, equip=False),
+                rtol=gs.rtol,
+                atol=gs.atol,
+            )
+        ]
+        return self.generate_tests(smoke_data)
+
+
+class SRVTranslationMetricTestData(_RiemannianMetricTestData):
+    ambient_manifolds_list = [r2, r3]
+
+    shape_list = [(10, 2), (10, 3)]
+    space_list = [
+        DiscreteCurves(ambient_manifold, equip=False)
+        for ambient_manifold in ambient_manifolds_list
+    ]
+    metric_args_list = [{} for _ in shape_list]
+
+    n_points_list = random.sample(range(2, 5), 2)
+    n_tangent_vecs_list = random.sample(range(2, 5), 2)
+    n_points_a_list = [1, 2]
+    n_points_b_list = [1, 2]
+    batch_size_list = random.sample(range(2, 5), 2)
+    alpha_list = [1] * 2
+    n_rungs_list = [1] * 2
+    scheme_list = ["pole"] * 2
+
+    n_samples_list = [1, 5]
+    a_list = [1, 2]
+    b_list = [2, 5]
+    a_b_list = list(zip(a_list, b_list))
+    
+    connection_args_list = metric_args_list = [{"a": a, "b": b} for a, b in a_b_list]
 
     Metric = SRVMetric
 
@@ -284,148 +482,7 @@ class SRVMetricTestData(_RiemannianMetricTestData):
         return self.generate_tests(smoke_data)
 
 
-class ElasticMetricTestData(_RiemannianMetricTestData):
-    n_samples_list = [1, 5]
-    a_list = [1, 2]
-    b_list = [2, 5]
-    a_b_list = list(zip(a_list, b_list))
-
-    ambient_manifolds_list = [r2] * len(a_b_list)
-    shape_list = [(10, 2), (10, 2)]
-    space_list = [
-        DiscreteCurves(ambient_manifold, equip=False)
-        for ambient_manifold in ambient_manifolds_list
-    ]
-    connection_args_list = metric_args_list = [{"a": a, "b": b} for a, b in a_b_list]
-
-    n_points_list = random.sample(range(2, 5), 2)
-    n_tangent_vecs_list = random.sample(range(2, 5), 2)
-    n_points_a_list = [1, 2]
-    n_points_b_list = [1, 2]
-    alpha_list = [1] * 2
-    n_rungs_list = [1] * 2
-    scheme_list = ["pole"] * 2
-
-    Metric = ElasticMetric
-
-    def cartesian_to_polar_and_polar_to_cartesian_test_data(self):
-        smoke_data = []
-        for n_samples in self.n_samples_list:
-            for a, b in self.a_b_list:
-                smoke_data.append(
-                    dict(
-                        space=DiscreteCurves(
-                            ambient_manifold=r2, start_at_the_origin=False, equip=False
-                        ),
-                        a=a,
-                        b=b,
-                        n_samples=n_samples,
-                        rtol=10 * gs.rtol,
-                        atol=10 * gs.atol,
-                    )
-                )
-
-        return self.generate_tests(smoke_data)
-
-    def f_transform_and_srv_transform_test_data(self):
-        smoke_data = [
-            dict(
-                space=DiscreteCurves(
-                    ambient_manifold=r2, start_at_the_origin=True, equip=False
-                ),
-                n_samples=n_samples,
-                rtol=gs.rtol,
-                atol=gs.atol,
-            )
-            for n_samples in self.n_samples_list
-        ]
-        return self.generate_tests(smoke_data)
-
-    def f_transform_inverse_and_srv_transform_inverse_test_data(self):
-        smoke_data = [
-            dict(
-                space=DiscreteCurves(
-                    ambient_manifold=r2, start_at_the_origin=True, equip=False
-                ),
-                curve=gs.stack([curve_a[:, 0], curve_a[:, 2]], axis=-1),
-                rtol=10 * gs.rtol,
-                atol=10 * gs.atol,
-            )
-        ]
-        return self.generate_tests(smoke_data)
-
-    def f_transform_and_f_transform_inverse_test_data(self):
-        smoke_data = [
-            dict(
-                space=DiscreteCurves(
-                    ambient_manifold=r2, start_at_the_origin=True, equip=False
-                ),
-                curve=gs.stack([curve_a[:, 0], curve_a[:, 2]], axis=-1),
-                a=a,
-                b=b,
-                rtol=10 * gs.rtol,
-                atol=10 * gs.atol,
-            )
-            for a, b in self.a_b_list
-        ]
-        return self.generate_tests(smoke_data)
-
-    def f_transform_and_diffeomorphism_test_data(self):
-        smoke_data = []
-        for n_samples in self.n_samples_list:
-            for a, b in self.a_b_list:
-                smoke_data.append(
-                    dict(
-                        space=DiscreteCurves(
-                            ambient_manifold=r2, start_at_the_origin=True, equip=False
-                        ),
-                        a=a,
-                        b=b,
-                        n_samples=n_samples,
-                        rtol=10 * gs.rtol,
-                        atol=10 * gs.atol,
-                    )
-                )
-
-        return self.generate_tests(smoke_data)
-
-    def f_transform_inverse_and_inverse_diffeomorphism_test_data(self):
-        smoke_data = [
-            dict(
-                space=DiscreteCurves(
-                    ambient_manifold=r2, start_at_the_origin=True, equip=False
-                ),
-                curve=gs.stack(
-                    [curve_a[:, 0], curve_a[:, 2]],
-                    axis=-1,
-                ),
-                a=a,
-                b=b,
-                rtol=10 * gs.rtol,
-                atol=10 * gs.atol,
-            )
-            for a, b in self.a_b_list
-        ]
-        return self.generate_tests(smoke_data)
-
-    def elastic_dist_test_data(self):
-        cells, _, _ = data_utils.load_cells()
-        curve_1, curve_2 = cells[0][:10], cells[1][:10]
-        smoke_data = [dict(a=1.0, b=0.5, curve_1=curve_1, curve_2=curve_2)]
-        return self.generate_tests(smoke_data)
-
-    def elastic_and_srv_dist_test_data(self):
-        smoke_data = [dict(a=1.0, b=0.5, curve_a=curve_a, curve_b=curve_b)]
-        return self.generate_tests(smoke_data)
-
-    def cartesian_to_polar_and_inverse_test_data(self):
-        cells, _, _ = data_utils.load_cells()
-        curve = cells[0]
-        smoke_data = [dict(a=1.0, b=1.0, curve=curve)]
-        return self.generate_tests(smoke_data)
-
-
-class SRVShapeBundleTestData(TestData):
+class SRVReparametrizationTranslationBundleTestData(TestData):
     methods = ["iterative horizontal projection", "dynamic programming"]
     thresholds = [1e-3, 1e-1]
 
@@ -451,6 +508,95 @@ class SRVShapeBundleTestData(TestData):
                     type_method=t,
                 ),
             )
+        return self.generate_tests(smoke_data)
+
+
+class SRVReparametrizationTranslationMetricTestData(_RiemannianMetricTestData):
+    ambient_manifolds_list = [r2, r3]
+
+    shape_list = [(10, 2), (10, 3)]
+    space_list = [
+        DiscreteCurves(ambient_manifold, equip=False)
+        for ambient_manifold in ambient_manifolds_list
+    ]
+    metric_args_list = [{} for _ in shape_list]
+
+    n_points_list = random.sample(range(2, 5), 2)
+    n_tangent_vecs_list = random.sample(range(2, 5), 2)
+    n_points_a_list = [1, 2]
+    n_points_b_list = [1, 2]
+    batch_size_list = random.sample(range(2, 5), 2)
+    alpha_list = [1] * 2
+    n_rungs_list = [1] * 2
+    scheme_list = ["pole"] * 2
+
+    n_samples_list = [1, 5]
+    a_list = [1, 2]
+    b_list = [2, 5]
+    a_b_list = list(zip(a_list, b_list))
+    
+    connection_args_list = metric_args_list = [{"a": a, "b": b} for a, b in a_b_list]
+
+    Metric = SRVMetric
+
+    def dist_test_data(self):
+        smoke_data = [
+            dict(
+                sampling_times=sampling_times,
+                curve_fun_a=curve_fun_a,
+                curve_a=curve_a,
+                k_sampling_points=k_sampling_points,
+            )
+        ]
+        return self.generate_tests(smoke_data)
+
+
+class SRVReparametrizationMetricTestData(_RiemannianMetricTestData):
+    ambient_manifolds_list = [r2, r3]
+
+    shape_list = [(10, 2), (10, 3)]
+    space_list = [
+        DiscreteCurves(ambient_manifold, equip=False)
+        for ambient_manifold in ambient_manifolds_list
+    ]
+    metric_args_list = [{} for _ in shape_list]
+
+    n_points_list = random.sample(range(2, 5), 2)
+    n_tangent_vecs_list = random.sample(range(2, 5), 2)
+    n_points_a_list = [1, 2]
+    n_points_b_list = [1, 2]
+    batch_size_list = random.sample(range(2, 5), 2)
+    alpha_list = [1] * 2
+    n_rungs_list = [1] * 2
+    scheme_list = ["pole"] * 2
+
+    n_samples_list = [1, 5]
+    a_list = [1, 2]
+    b_list = [2, 5]
+    a_b_list = list(zip(a_list, b_list))
+    
+    connection_args_list = metric_args_list = [{"a": a, "b": b} for a, b in a_b_list]
+
+    Metric = SRVMetric
+
+    def diffeomorphism_and_inverse_diffeomorphism_test_data(self):
+        smoke_data = [
+            dict(
+                space=DiscreteCurves(ambient_manifold=r3, equip=False),
+                rtol=gs.rtol,
+                atol=gs.atol,
+            )
+        ]
+        return self.generate_tests(smoke_data)
+    
+    def tangent_diffeomorphism_and_inverse_tangent_test_data(self):
+        smoke_data = [
+            dict(
+                space=DiscreteCurves(ambient_manifold=r3, equip=False),
+                rtol=gs.rtol,
+                atol=gs.atol,
+            )
+        ]
         return self.generate_tests(smoke_data)
 
 
@@ -491,16 +637,3 @@ class ClosedDiscreteCurvesTestData(_ManifoldTestData):
             )
         ]
         return self.generate_tests([], random_data)
-
-
-class SRVQuotientMetricTestData(TestData):
-    def dist_test_data(self):
-        smoke_data = [
-            dict(
-                sampling_times=sampling_times,
-                curve_fun_a=curve_fun_a,
-                curve_a=curve_a,
-                k_sampling_points=k_sampling_points,
-            )
-        ]
-        return self.generate_tests(smoke_data)
